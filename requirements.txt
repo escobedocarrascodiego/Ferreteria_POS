@@ -1,0 +1,14 @@
+Django==5.2.4
+django-environ==0.14.0   # lee la configuracion desde .env
+mysqlclient==2.2.7       # driver MySQL
+openpyxl==3.1.5          # importar el catalogo desde Excel
+djangorestframework==3.16.0
+
+# ---------- Facturacion electronica SUNAT ----------
+lxml==5.4.0              # construccion del XML UBL 2.1
+signxml==4.1.0           # firma del comprobante
+cryptography==45.0.5     # lectura del certificado .p12
+requests==2.32.4         # envio SOAP y consultas DNI/RUC
+reportlab==4.4.2         # boletas y facturas en PDF
+qrcode==8.2              # QR del comprobante
+pillow==11.3.0           # imagen del QR

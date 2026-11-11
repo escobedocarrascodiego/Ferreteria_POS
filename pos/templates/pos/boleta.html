@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boleta {{ venta.numero }}</title>
+  <style>
+    @media print {
+      @page { size: 80mm auto; margin: 0; }
+      body { padding: 0; }
+      .no-print { display: none; }
+    }
+    body {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.25;
+      margin: 0;
+      padding: 10px;
+      background: #fff;
+      color: #000;
+    }
+    .ticket { width: 80mm; max-width: 100%; margin: 0 auto; padding: 8px; box-sizing: border-box; }
+    .centro { text-align: center; }
+    .negocio { font-size: 18px; font-weight: bold; }
+    .numero { font-size: 15px; font-weight: bold; margin-top: 6px; }
+    .linea { border-top: 1px dashed #000; margin: 8px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 12px; border-bottom: 1px solid #000; padding-bottom: 2px; }
+    td { vertical-align: top; padding: 2px 0; }
+    .der { text-align: right; white-space: nowrap; }
+    .detalle { font-size: 12px; }
+    .total { display: flex; justify-content: space-between; font-size: 17px; font-weight: bold; }
+    .anulada { border: 2px solid #000; font-size: 18px; font-weight: bold; padding: 4px; margin: 8px 0; }
+    .imprimir {
+      position: fixed; top: 12px; right: 12px; background: #ea580c; color: #fff; border: 0;
+      padding: 8px 14px; border-radius: 5px; cursor: pointer; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <button class="imprimir no-print" onclick="window.print()">Imprimir</button>
+
+  <div class="ticket">
+    <div class="centro">
+      <div class="negocio">{{ negocio.nombre }}</div>
+      {% if negocio.ruc %}<div>RUC: {{ negocio.ruc }}</div>{% endif %}
+      {% if negocio.direccion %}<div>{{ negocio.direccion }}</div>{% endif %}
+      {% if negocio.telefono %}<div>Tel: {{ negocio.telefono }}</div>{% endif %}
+      <div class="numero">TICKET DE VENTA<br>{{ venta.numero }}</div>
+      <div>{{ venta.fecha|date:"d/m/Y H:i" }}</div>
+      {% if venta.anulada %}<div class="anulada">ANULADA</div>{% endif %}
+    </div>
+
+    <div class="linea"></div>
+
+    {% if venta.cliente_nombre or venta.cliente_documento %}
+    <div>Cliente: {{ venta.cliente_nombre|default:"-" }}</div>
+    {% if venta.cliente_documento %}<div>Doc.: {{ venta.cliente_documento }}</div>{% endif %}
+    {% endif %}
+    <div>Vendedor: {{ venta.vendedor.get_full_name|default:venta.vendedor.username }}</div>
+
+    <div class="linea"></div>
+
+    <table>
+      <thead>
+        <tr><th>Descripción</th><th class="der">Importe</th></tr>
+      </thead>
+      <tbody>
+        {% for d in venta.detalles.all %}
+        <tr>
+          <td>
+            {{ d.descripcion }}
+            <div class="detalle">{{ d.cantidad_fmt }} {{ d.unidad }} x S/ {{ d.precio_unitario|floatformat:2 }}</div>
+          </td>
+          <td class="der">{{ d.subtotal|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="linea"></div>
+
+    <div class="total"><span>TOTAL</span><span>S/ {{ venta.total|floatformat:2 }}</span></div>
+    <div>Pago: {{ venta.get_metodo_pago_display }}</div>
+
+    <div class="linea"></div>
+    <div class="centro">
+      {% if venta.comprobante %}Comprobante electrónico: {{ venta.comprobante.numero_completo }}<br>
+      {% else %}Ticket interno, no es comprobante de pago<br>{% endif %}
+      ¡Gracias por su compra!
+    </div>
+  </div>
+
+  <script>
+    window.onload = function () { try { window.print(); } catch (e) {} };
+  </script>
+</body>
+</html>

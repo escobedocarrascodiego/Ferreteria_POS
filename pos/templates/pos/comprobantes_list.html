@@ -1,0 +1,527 @@
+{% extends 'pos/base.html' %}
+{% load static l10n %}
+
+{% block title %}Comprobantes Electrónicos{% endblock %}
+{% block main_class %}max-w-7xl mx-auto px-4 py-5{% endblock %}
+
+{% block content %}
+<div id="aviso" class="hidden"></div>
+
+<!-- Cabecera -->
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+  <div>
+    <h2 class="text-2xl font-bold text-slate-900">Comprobantes electrónicos</h2>
+    <p class="text-sm text-slate-500">Boletas, facturas y notas de crédito enviadas a SUNAT</p>
+  </div>
+  <div class="flex gap-2">
+    {% if en_cola %}
+    <button type="button" onclick="procesarCola(this)"
+            class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-medium">
+      <i class="fas fa-rotate mr-2"></i>Reintentar cola ({{ en_cola }})
+    </button>
+    {% endif %}
+    <a href="{% url 'ventas' %}"
+       class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-medium">
+      <i class="fas fa-list mr-2"></i>Ver ventas
+    </a>
+  </div>
+</div>
+
+<!-- Resumen -->
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+  <div class="bg-white rounded-xl border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">Comprobantes</div>
+    <div class="text-2xl font-bold text-slate-800">{{ resumen_comprobantes.total }}</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">Aceptados</div>
+    <div class="text-2xl font-bold text-emerald-600">{{ resumen_comprobantes.aceptados }}</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">Pendientes</div>
+    <div class="text-2xl font-bold text-amber-500">{{ resumen_comprobantes.pendientes }}</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">Rechazados</div>
+    <div class="text-2xl font-bold text-red-600">{{ resumen_comprobantes.rechazados }}</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">Importe aceptado</div>
+    <div class="text-2xl font-bold text-blue-600">
+      S/ {{ resumen_comprobantes.importe|floatformat:2 }}</div>
+  </div>
+</div>
+
+<!-- Filtros -->
+<form method="get" class="bg-white rounded-lg shadow-sm p-3 mb-4 flex flex-wrap gap-3 items-end">
+  <div>
+    <label class="block text-xs font-medium text-slate-600 mb-1">Desde</label>
+    <input type="date" name="fecha_inicio" value="{{ request.GET.fecha_inicio }}"
+           class="px-3 py-2 border border-slate-300 rounded-md">
+  </div>
+  <div>
+    <label class="block text-xs font-medium text-slate-600 mb-1">Hasta</label>
+    <input type="date" name="fecha_fin" value="{{ request.GET.fecha_fin }}"
+           class="px-3 py-2 border border-slate-300 rounded-md">
+  </div>
+  <div>
+    <label class="block text-xs font-medium text-slate-600 mb-1">Tipo</label>
+    <select name="tipo" class="px-3 py-2 border border-slate-300 rounded-md">
+      <option value="">Todos</option>
+      <option value="03" {% if request.GET.tipo == '03' %}selected{% endif %}>Boleta</option>
+      <option value="01" {% if request.GET.tipo == '01' %}selected{% endif %}>Factura</option>
+      <option value="07" {% if request.GET.tipo == '07' %}selected{% endif %}>Nota de crédito</option>
+    </select>
+  </div>
+  <div>
+    <label class="block text-xs font-medium text-slate-600 mb-1">Estado</label>
+    <select name="estado" class="px-3 py-2 border border-slate-300 rounded-md">
+      <option value="">Todos</option>
+      {% for valor, etiqueta in estado_sunat_choices %}
+      <option value="{{ valor }}" {% if request.GET.estado == valor %}selected{% endif %}>
+        {{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="block text-xs font-medium text-slate-600 mb-1">Serie</label>
+    <input type="text" name="serie" value="{{ request.GET.serie }}" placeholder="B001" maxlength="4"
+           class="w-24 px-3 py-2 border border-slate-300 rounded-md font-mono text-sm">
+  </div>
+  <div>
+    <label class="block text-xs font-medium text-slate-600 mb-1">Número</label>
+    <input type="text" name="numero" value="{{ request.GET.numero }}" placeholder="123"
+           class="w-24 px-3 py-2 border border-slate-300 rounded-md font-mono text-sm">
+  </div>
+  <div class="flex-1 min-w-[160px]">
+    <label class="block text-xs font-medium text-slate-600 mb-1">Cliente</label>
+    <input type="text" name="cliente" value="{{ request.GET.cliente }}"
+           placeholder="Nombre o documento"
+           class="w-full px-3 py-2 border border-slate-300 rounded-md">
+  </div>
+  <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md">
+    <i class="fas fa-filter mr-1"></i>Filtrar
+  </button>
+  <a href="{% url 'comprobantes_list' %}" class="text-sm text-slate-500 hover:underline pb-2">
+    Limpiar</a>
+</form>
+
+<!-- Tabla -->
+<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-50 text-slate-600 text-xs uppercase">
+        <tr>
+          <th class="px-3 py-3 text-left">Comprobante</th>
+          <th class="px-3 py-3 text-left">Fecha</th>
+          <th class="px-3 py-3 text-left">Cliente</th>
+          <th class="px-3 py-3 text-right">Total</th>
+          <th class="px-3 py-3 text-center">Estado SUNAT</th>
+          <th class="px-3 py-3 text-left">Plazo de baja</th>
+          <th class="px-3 py-3 text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for c in comprobantes %}
+        <tr class="hover:bg-slate-50 align-top">
+          <!-- Comprobante -->
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2">
+              {% if c.tipo_comprobante == '07' %}
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">NC</span>
+              {% elif c.tipo_comprobante == '01' %}
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">FAC</span>
+              {% else %}
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">BOL</span>
+              {% endif %}
+              <a href="{% url 'comprobante_electronico' c.id %}"
+                 class="font-mono font-medium text-slate-800 hover:text-blue-600">
+                {{ c.numero_completo }}
+              </a>
+            </div>
+            {% if c.documento_modificado %}
+            <div class="text-[11px] text-purple-600 mt-0.5">
+              <i class="fas fa-arrow-turn-up fa-rotate-90 mr-1"></i>modifica
+              {{ c.documento_modificado.numero_completo }}
+            </div>
+            {% endif %}
+            {% if c.notas_asociadas.exists %}
+            <div class="text-[11px] text-amber-600 mt-0.5">
+              <i class="fas fa-file-circle-minus mr-1"></i>tiene nota de crédito
+            </div>
+            {% endif %}
+          </td>
+
+          <!-- Fecha -->
+          <td class="px-3 py-2.5 whitespace-nowrap text-slate-600">
+            {{ c.fecha_emision|date:"d/m/Y" }}
+            <span class="block text-[11px] text-slate-400">{{ c.fecha_emision|date:"H:i" }}</span>
+          </td>
+
+          <!-- Cliente -->
+          <td class="px-3 py-2.5">
+            <div class="text-slate-800">{{ c.receptor_razon_social|truncatechars:30 }}</div>
+            <div class="text-[11px] text-slate-400 font-mono">{{ c.receptor_numero_documento }}</div>
+          </td>
+
+          <!-- Total -->
+          <td class="px-3 py-2.5 text-right">
+            <div class="font-semibold text-slate-900">S/ {{ c.total|floatformat:2 }}</div>
+            <div class="text-[11px] text-slate-400">IGV {{ c.igv|floatformat:2 }}</div>
+          </td>
+
+          <!-- Estado -->
+          <td class="px-3 py-2.5 text-center">
+            {% if c.estado_sunat == 'ACEPTADO' %}
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-700">
+              <i class="fas fa-check mr-1"></i>Aceptado</span>
+            {% elif c.estado_sunat == 'RECHAZADO' %}
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-700"
+                  title="{{ c.respuesta_sunat|default:''|truncatechars:180 }}">
+              <i class="fas fa-xmark mr-1"></i>Rechazado</span>
+            {% elif c.estado_sunat == 'ANULADO' %}
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-200 text-slate-600">
+              Anulado</span>
+            {% elif c.estado_sunat == 'ENVIADO' %}
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700">
+              <i class="fas fa-paper-plane mr-1"></i>Enviado</span>
+            {% else %}
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">
+              Pendiente</span>
+            {% endif %}
+            {% if c.codigo_respuesta_sunat %}
+            <div class="text-[10px] text-slate-400 mt-0.5 font-mono">{{ c.codigo_respuesta_sunat }}</div>
+            {% endif %}
+          </td>
+
+          <!-- Plazo de baja -->
+          <td class="px-3 py-2.5 text-[11px]">
+            {% if c.puede_anularse %}
+              {% if c.dias_restantes_baja <= 2 %}
+              <span class="text-red-600 font-semibold">
+                <i class="fas fa-clock mr-1"></i>{{ c.dias_restantes_baja }} día{{ c.dias_restantes_baja|pluralize }}</span>
+              {% else %}
+              <span class="text-slate-500">{{ c.dias_restantes_baja }} días</span>
+              {% endif %}
+              <div class="text-slate-400">hasta {{ c.fecha_limite_baja|date:"d/m" }}</div>
+            {% elif c.tipo_comprobante == '07' %}
+              <span class="text-slate-400">—</span>
+            {% elif c.estado_sunat == 'ACEPTADO' %}
+              <span class="text-slate-400">Plazo vencido</span>
+            {% else %}
+              <span class="text-slate-300">—</span>
+            {% endif %}
+          </td>
+
+          <!-- Acciones -->
+          <td class="px-3 py-2.5">
+            <div class="flex flex-wrap gap-1 justify-end">
+              {% if c.estado_sunat == 'ACEPTADO' %}
+              <a href="{% url 'pdf_boleta' c.id %}" target="_blank"
+                 class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs"
+                 title="Descargar PDF">
+                <i class="fas fa-file-pdf"></i>
+              </a>
+              {% endif %}
+
+              {% if c.estado_sunat in 'PENDIENTE,RECHAZADO' %}
+              <form method="post" action="{% url 'enviar_comprobante_sunat_api' %}"
+                    onsubmit="return enviarSUNAT(this)" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="comprobante_id" value="{{ c.id }}">
+                <button type="submit"
+                        class="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs">
+                  <i class="fas fa-paper-plane mr-1"></i>Enviar
+                </button>
+              </form>
+              {% endif %}
+
+              {% if c.puede_anularse %}
+                {% if not c.notas_asociadas.exists %}
+                <button type="button"
+                        onclick="notaCredito('{{ c.id }}', '{{ c.numero_completo }}')"
+                        class="px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                        title="Emitir nota de crédito">
+                  <i class="fas fa-file-circle-minus mr-1"></i>Nota de crédito
+                </button>
+                {% endif %}
+
+                {% if c.tipo_comprobante == '03' %}
+                <form method="post" action="{% url 'anular_boleta_sunat_api' %}"
+                      onsubmit="return anularBoleta(this)" class="inline"
+                      data-emision-date="{{ c.fecha_emision|date:'Y-m-d' }}">
+                  {% csrf_token %}
+                  <input type="hidden" name="comprobante_id" value="{{ c.id }}">
+                  <input type="hidden" name="modo" value="">
+                  <input type="hidden" name="motivo" value="">
+                  <button type="submit"
+                          class="px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs">
+                    <i class="fas fa-ban mr-1"></i>Anular
+                  </button>
+                </form>
+                {% else %}
+                <form method="post" action="{% url 'anular_factura_sunat_api' %}"
+                      onsubmit="return anularFactura(this)" class="inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="comprobante_id" value="{{ c.id }}">
+                  <input type="hidden" name="motivo" value="">
+                  <button type="submit"
+                          class="px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs">
+                    <i class="fas fa-ban mr-1"></i>Anular
+                  </button>
+                </form>
+                {% endif %}
+              {% endif %}
+
+              {% if c.estado_sunat == 'ENVIADO' %}
+              <form method="post" action="{% url 'consultar_ticket_baja_api' %}"
+                    onsubmit="return consultarBaja(this)" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="comprobante_id" value="{{ c.id }}">
+                <button type="submit"
+                        class="px-2 py-1 rounded bg-slate-600 hover:bg-slate-700 text-white text-xs">
+                  <i class="fas fa-magnifying-glass mr-1"></i>Consultar
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7" class="px-3 py-12 text-center text-slate-500">
+            <i class="fas fa-file-invoice text-4xl mb-3 block"></i>
+            No hay comprobantes que coincidan con el filtro.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginación -->
+  {% if is_paginated %}
+  <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-sm">
+    <span class="text-slate-500">
+      Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+      · {{ page_obj.paginator.count }} comprobante{{ page_obj.paginator.count|pluralize }}
+    </span>
+    <div class="flex gap-1">
+      {% if page_obj.has_previous %}
+      <a href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}"
+         class="px-3 py-1 rounded bg-slate-100 hover:bg-slate-200">Anterior</a>
+      {% endif %}
+      {% if page_obj.has_next %}
+      <a href="?{% for k,v in request.GET.items %}{% if k != 'page' %}{{ k }}={{ v }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}"
+         class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white">Siguiente</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<form id="procesarColaForm" method="post" action="{% url 'procesar_cola_envio_sunat_api' %}" class="hidden">
+  {% csrf_token %}
+</form>
+
+<!-- ==================== Modal de nota de crédito ==================== -->
+<div id="modal-nc" class="hidden fixed inset-0 bg-black/50 z-50">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl w-full max-w-md shadow-2xl">
+      <div class="px-5 py-4 border-b border-slate-200">
+        <h3 class="text-lg font-semibold text-slate-900">Emitir nota de crédito</h3>
+        <p class="text-sm text-slate-500">
+          Sobre el comprobante <b id="nc-documento" class="font-mono"></b>
+        </p>
+      </div>
+
+      <div class="p-5 space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Motivo (catálogo 09 SUNAT)</label>
+          <select id="nc-tipo" class="w-full px-3 py-2 border border-slate-300 rounded-md">
+            <option value="01">01 · Anulación de la operación</option>
+            <option value="06">06 · Devolución total</option>
+            <option value="07">07 · Devolución por ítem</option>
+            <option value="02">02 · Anulación por error en el RUC</option>
+            <option value="03">03 · Corrección por error en la descripción</option>
+            <option value="04">04 · Descuento global</option>
+            <option value="05">05 · Descuento por ítem</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Detalle</label>
+          <input type="text" id="nc-motivo" maxlength="250"
+                 placeholder="Se explica en el comprobante que recibe el cliente"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-md">
+        </div>
+
+        <div class="bg-amber-50 border-l-4 border-amber-400 px-3 py-2 text-sm text-amber-800">
+          La nota de crédito anula el importe total del comprobante y se envía a
+          SUNAT al confirmar. No se puede deshacer.
+        </div>
+
+        <div id="nc-error" class="hidden text-sm text-red-600 bg-red-50 rounded p-2"></div>
+      </div>
+
+      <div class="px-5 pb-5 flex gap-2">
+        <button type="button" id="nc-cancelar"
+                class="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 rounded-lg">Cancelar</button>
+        <button type="button" id="nc-confirmar"
+                class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-lg">
+          <i class="fas fa-file-circle-minus mr-2"></i>Emitir y enviar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const csrfToken = '{{ csrf_token }}';
+let ncComprobanteId = null;
+
+function avisar(texto, tipo) {
+  const el = document.getElementById('aviso');
+  const colores = { ok: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-slate-800' };
+  el.className = 'fixed top-20 right-4 z-[60] px-4 py-3 rounded-lg shadow-xl text-sm ' +
+                 'font-medium text-white max-w-sm ' + (colores[tipo] || colores.info);
+  el.textContent = texto;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+/** Envuelve un envío de formulario: deshabilita el botón y recarga al terminar. */
+function enviarFormulario(form, textoCargando) {
+  const btn = form.querySelector('button[type="submit"]');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>' + textoCargando;
+
+  fetch(form.action, { method: 'POST', body: new FormData(form) })
+    .then((r) => r.json())
+    .then((d) => {
+      if (d.error) {
+        avisar(d.error, 'error');
+        btn.disabled = false;
+        btn.innerHTML = original;
+        return;
+      }
+      avisar(d.mensaje || 'Operación completada', 'ok');
+      setTimeout(() => window.location.reload(), 1200);
+    })
+    .catch(() => {
+      avisar('No se pudo contactar con el servidor', 'error');
+      btn.disabled = false;
+      btn.innerHTML = original;
+    });
+  return false;
+}
+
+function enviarSUNAT(form) {
+  return enviarFormulario(form, 'Enviando...');
+}
+
+/** Fecha de hoy en Lima, para decidir entre baja del día (RC) o comunicación (RA). */
+function hoyEnLima() {
+  const f = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  return f;
+}
+
+function anularBoleta(form) {
+  // Las boletas se dan de baja SIEMPRE por Resumen Diario (RC), sean de hoy
+  // o de dias anteriores. En AdminPOS aqui se pedia 'RA' para las de dias
+  // anteriores y el servidor lo rechaza, asi que esas no se podian anular.
+  form.querySelector('input[name="modo"]').value = 'RC';
+  form.querySelector('input[name="motivo"]').value = 'Anulación de la operación';
+  if (!confirm('¿Anular esta boleta? Se enviará el resumen de baja a SUNAT. ' +
+               'Luego pulsa "Consultar" para confirmar que SUNAT la aceptó.')) return false;
+  return enviarFormulario(form, 'Anulando...');
+}
+
+function anularFactura(form) {
+  const m = prompt('Motivo de la anulación (RA):', 'Anulación por solicitud del cliente');
+  if (m === null) return false;
+  form.querySelector('input[name="motivo"]').value =
+    (m || '').trim() || 'Anulación por solicitud del cliente';
+  return enviarFormulario(form, 'Anulando...');
+}
+
+function consultarBaja(form) {
+  return enviarFormulario(form, 'Consultando...');
+}
+
+async function procesarCola(btn) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Procesando...';
+  try {
+    const form = document.getElementById('procesarColaForm');
+    const r = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+    const d = await r.json();
+    avisar(d.mensaje || d.error || 'Cola procesada', d.error ? 'error' : 'ok');
+    if (!d.error) setTimeout(() => window.location.reload(), 1200);
+  } catch (e) {
+    avisar('No se pudo procesar la cola', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+// ---------------------- Nota de crédito ----------------------
+function notaCredito(id, numero) {
+  ncComprobanteId = id;
+  document.getElementById('nc-documento').textContent = numero;
+  document.getElementById('nc-motivo').value = '';
+  document.getElementById('nc-error').classList.add('hidden');
+  document.getElementById('modal-nc').classList.remove('hidden');
+  setTimeout(() => document.getElementById('nc-motivo').focus(), 50);
+}
+
+document.getElementById('nc-cancelar').addEventListener('click', () => {
+  document.getElementById('modal-nc').classList.add('hidden');
+});
+
+document.getElementById('nc-confirmar').addEventListener('click', async () => {
+  const err = document.getElementById('nc-error');
+  const btn = document.getElementById('nc-confirmar');
+  err.classList.add('hidden');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Emitiendo...';
+
+  try {
+    const r = await fetch('{% url "crear_nota_credito_api" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify({
+        comprobante_id: ncComprobanteId,
+        tipo_nota: document.getElementById('nc-tipo').value,
+        motivo: document.getElementById('nc-motivo').value,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) {
+      err.textContent = d.error || 'No se pudo emitir la nota de crédito.';
+      err.classList.remove('hidden');
+      return;
+    }
+    document.getElementById('modal-nc').classList.add('hidden');
+    avisar(d.mensaje, 'ok');
+    setTimeout(() => window.location.reload(), 1500);
+  } catch (e) {
+    err.textContent = 'No se pudo contactar con el servidor.';
+    err.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-file-circle-minus mr-2"></i>Emitir y enviar';
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.getElementById('modal-nc').classList.add('hidden');
+});
+</script>
+{% endblock %}

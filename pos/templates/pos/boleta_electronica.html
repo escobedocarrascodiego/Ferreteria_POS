@@ -1,0 +1,382 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boleta Electrónica #{{ comprobante.numero_completo }}</title>
+    <style>
+        @media print {
+            @page {
+                size: A4;
+                margin: 1cm;
+            }
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            .no-print {
+                display: none;
+            }
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            margin: 0;
+            padding: 20px;
+            background: white;
+            color: #333;
+        }
+        
+        .boleta {
+            max-width: 800px;
+            margin: 0 auto;
+            border: 2px solid #000;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .logo {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 10px auto;
+            display: block;
+            object-fit: contain;
+        }
+        
+        .empresa-nombre {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        
+        .empresa-info {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .tipo-comprobante {
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+            text-transform: uppercase;
+            color: #000;
+        }
+        
+        .numero-comprobante {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .fecha-emision {
+            text-align: center;
+            font-size: 11px;
+            margin-bottom: 20px;
+        }
+        
+        .datos-cliente {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 20px;
+            background: #f9f9f9;
+        }
+        
+        .cliente-titulo {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .cliente-info {
+            font-size: 11px;
+        }
+        
+        .tabla-detalles {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        .tabla-detalles th {
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 11px;
+        }
+        
+        .tabla-detalles td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            font-size: 11px;
+        }
+        
+        .texto-centro {
+            text-align: center;
+        }
+        
+        .texto-derecha {
+            text-align: right;
+        }
+        
+        .totales {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin-bottom: 20px;
+            background: #f9f9f9;
+        }
+        
+        .total-linea {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .total-final {
+            font-size: 14px;
+            font-weight: bold;
+            border-top: 2px solid #000;
+            padding-top: 10px;
+            margin-top: 10px;
+        }
+        
+        .metodo-pago {
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .qr-code {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .qr-code img {
+            width: 150px;
+            height: 150px;
+        }
+        
+        .footer {
+            text-align: center;
+            font-size: 10px;
+            color: #666;
+            border-top: 1px solid #ccc;
+            padding-top: 15px;
+            margin-top: 20px;
+        }
+        
+        .estado-sunat {
+            text-align: center;
+            margin: 10px 0;
+            padding: 5px;
+            font-weight: bold;
+        }
+        
+        .estado-aceptado {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .estado-pendiente {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .estado-rechazado {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .print-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .print-button:hover {
+            background: #0056b3;
+        }
+        
+        .leyenda-sunat {
+            font-size: 9px;
+            color: #666;
+            text-align: center;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <button class="print-button no-print" onclick="window.print()">
+        <i class="fas fa-print"></i> Imprimir
+    </button>
+    
+    <div class="boleta">
+        <!-- Header -->
+        <div class="header">
+            {% if sede_logo %}
+            <img src="{{ sede_logo }}" alt="Logo" class="logo">
+            {% endif %}
+            <div class="empresa-nombre">{{ comprobante.emisor_razon_social }}</div>
+            <div class="empresa-info">
+                RUC: {{ comprobante.emisor_ruc }}<br>
+                {{ comprobante.emisor_direccion }}<br>
+                Ubigeo: {{ comprobante.emisor_ubigeo }}
+            </div>
+        </div>
+        
+        <!-- Tipo de Comprobante -->
+        <div class="tipo-comprobante">
+            {% if comprobante.tipo_comprobante == '03' %}
+                BOLETA ELECTRÓNICA
+            {% elif comprobante.tipo_comprobante == '01' %}
+                FACTURA ELECTRÓNICA
+            {% else %}
+                COMPROBANTE ELECTRÓNICO
+            {% endif %}
+        </div>
+        
+        <!-- Número de Comprobante -->
+        <div class="numero-comprobante">
+            {{ comprobante.numero_completo }}
+        </div>
+        
+        <!-- Fecha de Emisión -->
+        <div class="fecha-emision">
+            Fecha de Emisión: {{ comprobante.fecha_emision|date:"d/m/Y H:i:s" }}
+        </div>
+        
+        <!-- Estado SUNAT -->
+        <div class="estado-sunat estado-{{ comprobante.estado_sunat|lower }}">
+            {% if comprobante.estado_sunat == 'ACEPTADO' %}
+                ✓ COMPROBANTE ELECTRÓNICO ACEPTADO POR SUNAT
+            {% elif comprobante.estado_sunat == 'PENDIENTE' %}
+                ⏳ PENDIENTE DE ENVÍO A SUNAT
+            {% elif comprobante.estado_sunat == 'RECHAZADO' %}
+                ✗ COMPROBANTE RECHAZADO POR SUNAT
+            {% else %}
+                {{ comprobante.get_estado_sunat_display }}
+            {% endif %}
+        </div>
+        
+        <!-- Datos del Cliente -->
+        <div class="datos-cliente">
+            <div class="cliente-titulo">DATOS DEL CLIENTE:</div>
+            <div class="cliente-info">
+                {% if comprobante.receptor_tipo_documento == '1' %}
+                    DNI: {{ comprobante.receptor_numero_documento }}
+                {% elif comprobante.receptor_tipo_documento == '6' %}
+                    RUC: {{ comprobante.receptor_numero_documento }}
+                {% else %}
+                    Documento: {{ comprobante.receptor_numero_documento }}
+                {% endif %}<br>
+                Razón Social: {{ comprobante.receptor_razon_social }}<br>
+                {% if comprobante.receptor_direccion %}
+                    Dirección: {{ comprobante.receptor_direccion }}
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Tabla de Detalles -->
+        <table class="tabla-detalles">
+            <thead>
+                <tr>
+                    <th>Cant.</th>
+                    <th>Descripción</th>
+                    <th>P.Unit.</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for detalle in comprobante.detalles.all %}
+                <tr>
+                    <td class="texto-centro">{{ detalle.cantidad }}</td>
+                    <td>{{ detalle.descripcion }}</td>
+                    <td class="texto-derecha">S/. {{ detalle.precio_unitario|floatformat:2 }}</td>
+                    <td class="texto-derecha">S/. {{ detalle.subtotal|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <!-- Totales -->
+        <div class="totales">
+            <div class="total-linea">
+                <span>Subtotal:</span>
+                <span>S/. {{ comprobante.subtotal|floatformat:2 }}</span>
+            </div>
+            <div class="total-linea">
+                <span>IGV (18%):</span>
+                <span>S/. {{ comprobante.igv|floatformat:2 }}</span>
+            </div>
+            <div class="total-linea total-final">
+                <span>TOTAL:</span>
+                <span>S/. {{ comprobante.total|floatformat:2 }}</span>
+            </div>
+        </div>
+        
+        <!-- Método de Pago -->
+        <div class="metodo-pago">
+            Método de Pago: {{ comprobante.venta_pos.get_metodo_pago_display }}
+        </div>
+        
+        <!-- Código QR (simulado) -->
+        <div class="qr-code">
+            <div style="width: 150px; height: 150px; margin: 0 auto; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; background: #f0f0f0;">
+                <div style="text-align: center; font-size: 10px; color: #666;">
+                    CÓDIGO QR<br>
+                    (Simulado)<br>
+                    {{ comprobante.numero_completo }}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <strong>{{ comprobante.emisor_razon_social }}</strong><br>
+            RUC: {{ comprobante.emisor_ruc }}<br>
+            {{ comprobante.emisor_direccion }}<br>
+            <br>
+            <strong>Representación Impresa de la Boleta Electrónica</strong><br>
+            Conserve este documento por el plazo que establezca la normativa vigente<br>
+            <br>
+            <div class="leyenda-sunat">
+                Este documento es una representación impresa de un comprobante electrónico.<br>
+                Para verificar su autenticidad, consulte en: www.sunat.gob.pe
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-print on load
+        window.onload = function() {
+            // Uncomment the next line to auto-print
+            // window.print();
+        };
+    </script>
+</body>
+</html> 

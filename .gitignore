@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+staticfiles/
+
+# Secretos: claves de la base, token de consultas, etc.
+.env
+
+# Certificado digital (.p12), logo y PDFs de comprobantes emitidos.
+# El certificado NUNCA debe subirse: con el y su clave se puede firmar
+# a nombre de la empresa ante SUNAT.
+media/
+*.p12
+*.pfx

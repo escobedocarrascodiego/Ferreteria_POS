@@ -1,0 +1,234 @@
+{% extends 'pos/base.html' %}
+{% block title %}Ventas{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4 mb-4">
+  <form method="get" class="flex items-end gap-2">
+    <div>
+      <label for="fecha" class="block text-sm font-medium text-gray-700 mb-1">Día</label>
+      <input id="fecha" name="fecha" type="date" value="{{ dia|date:'Y-m-d' }}"
+             class="border border-gray-300 rounded-md px-3 py-2" onchange="this.form.submit()">
+    </div>
+    <a href="{% url 'ventas' %}" class="px-3 py-2 text-sm text-gray-600 hover:text-gray-900">Hoy</a>
+  </form>
+
+  <div class="flex flex-wrap gap-3">
+    <div class="bg-white rounded-xl shadow px-4 py-2">
+      <p class="text-xs text-gray-500">Boletas</p>
+      <p class="text-xl font-bold">{{ cantidad }}</p>
+    </div>
+    {% for m in por_metodo %}
+    <div class="bg-white rounded-xl shadow px-4 py-2">
+      <p class="text-xs text-gray-500">{{ m.metodo_pago|title }}</p>
+      <p class="text-xl font-bold">S/ {{ m.t|floatformat:2 }}</p>
+    </div>
+    {% endfor %}
+    <div class="bg-gray-900 text-white rounded-xl shadow px-4 py-2">
+      <p class="text-xs text-gray-300">Total del día</p>
+      <p class="text-xl font-bold">S/ {{ total_dia|floatformat:2 }}</p>
+    </div>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-gray-600 text-left">
+      <tr>
+        <th class="px-3 py-2">Venta</th>
+        <th class="px-3 py-2">Hora</th>
+        <th class="px-3 py-2">Cliente</th>
+        <th class="px-3 py-2">Detalle</th>
+        <th class="px-3 py-2">Pago</th>
+        <th class="px-3 py-2 text-right">Total</th>
+        <th class="px-3 py-2">Comprobante SUNAT</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in ventas %}
+      <tr class="border-t border-gray-100 {% if v.anulada %}text-gray-400{% endif %}">
+        <td class="px-3 py-2 font-medium whitespace-nowrap">
+          {{ v.numero }}
+          {% if v.anulada %}<span class="ml-1 text-xs bg-red-100 text-red-700 rounded px-1.5 py-0.5">Anulada</span>{% endif %}
+        </td>
+        <td class="px-3 py-2">{{ v.fecha|date:"H:i" }}</td>
+        <td class="px-3 py-2">{{ v.cliente_nombre|default:"-" }}</td>
+        <td class="px-3 py-2 text-xs">
+          {% for d in v.detalles.all %}{{ d.cantidad_fmt }} × {{ d.descripcion }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        </td>
+        <td class="px-3 py-2">{{ v.get_metodo_pago_display }}</td>
+        <td class="px-3 py-2 text-right font-medium whitespace-nowrap {% if v.anulada %}line-through{% endif %}">
+          S/ {{ v.total|floatformat:2 }}
+        </td>
+        <td class="px-3 py-2 whitespace-nowrap">
+          {% with c=v.comprobante %}
+          {% if c %}
+            {% if c.xml_firmado %}
+            <a href="{% url 'pdf_boleta' c.id %}" target="_blank" class="font-medium text-gray-800 hover:underline"
+               title="Ver PDF"><i class="fas fa-file-pdf text-red-600 mr-1"></i>{{ c.numero_completo }}</a>
+            {% else %}
+            <a href="{% url 'comprobantes_list' %}?serie={{ c.serie }}&numero={{ c.numero }}"
+               class="font-medium text-gray-800 hover:underline"
+               title="Aún no se firmó ni envió: reenvíalo desde Comprobantes">{{ c.numero_completo }}</a>
+            {% endif %}
+            <span class="ml-1 text-xs rounded px-1.5 py-0.5
+              {% if c.estado_sunat == 'ACEPTADO' %}bg-green-100 text-green-700
+              {% elif c.estado_sunat == 'RECHAZADO' or c.estado_sunat == 'ANULADO' %}bg-red-100 text-red-700
+              {% else %}bg-amber-100 text-amber-700{% endif %}">{{ c.get_estado_sunat_display }}</span>
+            {% if c.estado_sunat != 'ACEPTADO' and c.estado_sunat != 'ANULADO' %}
+            <a href="{% url 'comprobantes_list' %}?serie={{ c.serie }}&numero={{ c.numero }}"
+               class="ml-1 text-xs text-orange-600 hover:underline">Reenviar</a>
+            {% endif %}
+          {% elif not v.anulada %}
+            <button type="button" class="js-emitir text-orange-600 hover:underline" data-tipo="03"
+                    data-venta="{{ v.pk }}" data-numero="{{ v.numero }}"
+                    data-doc="{{ v.cliente_documento }}" data-nombre="{{ v.cliente_nombre }}">Boleta</button>
+            <button type="button" class="js-emitir text-orange-600 hover:underline ml-2" data-tipo="01"
+                    data-venta="{{ v.pk }}" data-numero="{{ v.numero }}"
+                    data-doc="{{ v.cliente_documento }}" data-nombre="{{ v.cliente_nombre }}">Factura</button>
+          {% else %}<span class="text-gray-300">-</span>{% endif %}
+          {% endwith %}
+        </td>
+        <td class="px-3 py-2 text-right whitespace-nowrap">
+          <a href="{% url 'boleta' v.pk %}" target="_blank" class="text-orange-600 hover:underline">
+            <i class="fas fa-print"></i> Ticket
+          </a>
+          {% if user.is_staff and not v.anulada %}
+          <form method="post" action="{% url 'venta_anular' v.pk %}" class="inline ml-3"
+                onsubmit="return confirm('¿Anular la venta {{ v.numero }}?')">
+            {% csrf_token %}
+            <button type="submit" class="text-gray-500 hover:text-red-600">Anular</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="text-center text-gray-400 py-10">No hay ventas este día.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Emitir comprobante electronico de una venta ya registrada -->
+<div id="modal-emitir" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-3">
+    <h2 class="text-lg font-bold text-gray-900"><span id="em-titulo"></span></h2>
+    <p class="text-sm text-gray-500">Venta <span id="em-venta"></span>. Se firma y se envía a SUNAT.</p>
+    <div class="flex gap-2">
+      <input id="em-doc" type="text" maxlength="11" inputmode="numeric"
+             class="flex-1 min-w-0 border border-gray-300 rounded-md px-3 py-2">
+      <button id="em-buscar" type="button" class="border border-gray-300 rounded-md px-3 text-gray-600 hover:bg-gray-50"
+              title="Buscar nombre"><i class="fas fa-magnifying-glass"></i></button>
+    </div>
+    <input id="em-nombre" type="text" maxlength="200" class="w-full border border-gray-300 rounded-md px-3 py-2">
+    <input id="em-direccion" type="text" maxlength="200" placeholder="Dirección (opcional)"
+           class="w-full border border-gray-300 rounded-md px-3 py-2">
+    <p id="em-aviso" class="hidden text-sm rounded-md px-3 py-2"></p>
+    <div class="flex justify-end gap-2 pt-1">
+      <button id="em-cancelar" type="button" class="px-4 py-2 text-gray-600 hover:text-gray-900">Cerrar</button>
+      <button id="em-emitir" type="button"
+              class="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white font-semibold rounded-md px-4 py-2">
+        Emitir y enviar
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const CSRF = '{{ csrf_token }}';
+  const $ = id => document.getElementById(id);
+  let actual = null;      // {venta, tipo}
+  let emitido = false;
+
+  function aviso(texto, tipo) {
+    const el = $('em-aviso');
+    el.textContent = texto;
+    el.className = 'text-sm rounded-md px-3 py-2 ' +
+      (tipo === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700');
+  }
+
+  async function pedir(url, cuerpo) {
+    const opciones = cuerpo ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(cuerpo),
+    } : {};
+    const resp = await fetch(url, opciones);
+    return { ok: resp.ok, datos: await resp.json().catch(() => ({})) };
+  }
+
+  document.querySelectorAll('.js-emitir').forEach(boton => boton.addEventListener('click', () => {
+    const d = boton.dataset;
+    const factura = d.tipo === '01';
+    actual = { venta: d.venta, tipo: d.tipo };
+    $('em-titulo').textContent = factura ? 'Emitir factura electrónica' : 'Emitir boleta electrónica';
+    $('em-venta').textContent = d.numero;
+    $('em-doc').placeholder = factura ? 'RUC (11 dígitos)' : 'DNI (opcional)';
+    $('em-nombre').placeholder = factura ? 'Razón social' : 'Nombre (opcional)';
+    $('em-direccion').classList.toggle('hidden', !factura);
+    // Solo se arrastra el documento si sirve para este tipo de comprobante
+    $('em-doc').value = d.doc.length === (factura ? 11 : 8) ? d.doc : '';
+    $('em-nombre').value = d.nombre;
+    $('em-direccion').value = '';
+    $('em-aviso').className = 'hidden';
+    $('em-emitir').disabled = false;
+    $('modal-emitir').classList.remove('hidden');
+    $('em-doc').focus();
+  }));
+
+  $('em-cancelar').addEventListener('click', () => {
+    if (emitido) location.reload();
+    else $('modal-emitir').classList.add('hidden');
+  });
+
+  $('em-buscar').addEventListener('click', async () => {
+    const doc = $('em-doc').value.trim();
+    let url;
+    if (/^\d{8}$/.test(doc)) url = '{% url "consulta_dni_api" %}?dni=' + doc;
+    else if (/^\d{11}$/.test(doc)) url = '{% url "consulta_ruc_api" %}?ruc=' + doc;
+    else { aviso('Escribe un DNI (8 dígitos) o un RUC (11 dígitos).', 'error'); return; }
+    const { ok, datos } = await pedir(url).catch(() => ({ ok: false, datos: {} }));
+    const nombre = datos.nombre || datos.razon_social;
+    if (!ok || !nombre) { aviso(datos.error || 'No se encontró. Escríbelo a mano.', 'error'); return; }
+    $('em-nombre').value = nombre;
+    if (datos.direccion) $('em-direccion').value = datos.direccion;
+    $('em-aviso').className = 'hidden';
+  });
+
+  $('em-emitir').addEventListener('click', async () => {
+    const factura = actual.tipo === '01';
+    const doc = $('em-doc').value.trim(), nombre = $('em-nombre').value.trim();
+    if (factura && !/^\d{11}$/.test(doc)) { aviso('La factura necesita un RUC de 11 dígitos.', 'error'); return; }
+    if (factura && !nombre) { aviso('La factura necesita la razón social.', 'error'); return; }
+    if (!factura && doc && !/^\d{8}$/.test(doc)) { aviso('El DNI debe tener 8 dígitos (o déjalo vacío).', 'error'); return; }
+
+    $('em-emitir').disabled = true;
+    aviso('Creando comprobante...', 'ok');
+    const crear = await pedir('{% url "crear_comprobante_electronico_api" %}', {
+      venta_id: actual.venta, tipo: actual.tipo,
+      receptor_dni: factura ? '' : doc, receptor_nombre: factura ? '' : nombre,
+      receptor_ruc: factura ? doc : '', receptor_razon_social: factura ? nombre : '',
+      receptor_direccion: factura ? $('em-direccion').value.trim() : '',
+    });
+    if (!crear.ok || !crear.datos.success) {
+      aviso(crear.datos.error || 'No se pudo crear el comprobante.', 'error');
+      $('em-emitir').disabled = false;
+      return;
+    }
+    emitido = true;   // el correlativo ya se consumio: no se reintenta desde aqui
+    const comp = crear.datos.comprobante;
+    aviso(`${comp.numero_completo} creado. Enviando a SUNAT...`, 'ok');
+    const envio = await pedir('{% url "enviar_comprobante_sunat_api" %}', { comprobante_id: comp.id });
+    if (envio.ok && envio.datos.aceptado === true) {
+      aviso(`${comp.numero_completo} aceptado por SUNAT.`, 'ok');
+    } else {
+      aviso(`${comp.numero_completo} creado, pero no quedó aceptado. ` +
+            (envio.datos.error || envio.datos.estado_sunat || 'Sin respuesta.'), 'error');
+    }
+  });
+})();
+</script>
+{% endblock %}

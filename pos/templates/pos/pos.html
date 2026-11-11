@@ -1,0 +1,471 @@
+{% extends 'pos/base.html' %}
+{% block title %}Vender{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+  <!-- Buscador + boleta en armado -->
+  <section class="lg:col-span-2 space-y-4">
+    <div class="bg-white rounded-xl shadow p-4 relative">
+      <label for="buscar" class="block text-sm font-medium text-gray-700 mb-1">
+        Buscar producto <span class="text-gray-400 font-normal">(Enter para agregar)</span>
+      </label>
+      <input id="buscar" type="text" autocomplete="off" autofocus
+             placeholder="Ej: cemento, fierro 1/2, manguera..."
+             class="w-full border border-gray-300 rounded-md px-3 py-2 text-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+      <ul id="resultados"
+          class="hidden absolute left-4 right-4 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-80 overflow-y-auto z-30"></ul>
+    </div>
+
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-gray-600 text-left">
+          <tr>
+            <th class="px-3 py-2">Producto</th>
+            <th class="px-3 py-2 w-28">Cantidad</th>
+            <th class="px-3 py-2 w-32">Precio (S/)</th>
+            <th class="px-3 py-2 w-28 text-right">Subtotal</th>
+            <th class="px-3 py-2 w-10"></th>
+          </tr>
+        </thead>
+        <tbody id="filas"></tbody>
+      </table>
+      <p id="vacio" class="text-center text-gray-400 py-10">
+        Busca un producto para empezar la boleta.
+      </p>
+    </div>
+  </section>
+
+  <!-- Cobro -->
+  <aside class="bg-white rounded-xl shadow p-4 space-y-4 h-fit lg:sticky lg:top-24">
+    <div>
+      <span class="block text-sm font-medium text-gray-700 mb-1">Comprobante</span>
+      <div id="tipos" class="grid grid-cols-3 gap-1 text-sm">
+        <button type="button" data-tipo="" class="tipo border rounded-md py-2">Ticket</button>
+        <button type="button" data-tipo="03" class="tipo border rounded-md py-2">Boleta</button>
+        <button type="button" data-tipo="01" class="tipo border rounded-md py-2">Factura</button>
+      </div>
+      <p id="tipo-ayuda" class="text-xs text-gray-500 mt-1"></p>
+    </div>
+
+    <div>
+      <label for="cliente_documento" class="block text-sm font-medium text-gray-700 mb-1">
+        Cliente <span id="cliente-req" class="text-gray-400 font-normal">(opcional)</span>
+      </label>
+      <div class="flex gap-2 mb-2">
+        <input id="cliente_documento" type="text" maxlength="11" inputmode="numeric" placeholder="DNI / RUC"
+               class="flex-1 min-w-0 border border-gray-300 rounded-md px-3 py-2">
+        <button id="buscar-doc" type="button" title="Buscar nombre por DNI o RUC"
+                class="border border-gray-300 rounded-md px-3 text-gray-600 hover:bg-gray-50">
+          <i class="fas fa-magnifying-glass"></i>
+        </button>
+      </div>
+      <input id="cliente_nombre" type="text" maxlength="200" placeholder="Nombre o razón social"
+             class="w-full border border-gray-300 rounded-md px-3 py-2">
+      <input id="cliente_direccion" type="text" maxlength="200" placeholder="Dirección (factura)"
+             class="hidden w-full border border-gray-300 rounded-md px-3 py-2 mt-2">
+    </div>
+
+    <div>
+      <label for="metodo_pago" class="block text-sm font-medium text-gray-700 mb-1">Método de pago</label>
+      <select id="metodo_pago" class="w-full border border-gray-300 rounded-md px-3 py-2">
+        {% for valor, nombre in metodos_pago %}
+        <option value="{{ valor }}">{{ nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="bg-gray-900 text-white rounded-lg p-4 text-right">
+      <p class="text-sm text-gray-300">TOTAL</p>
+      <p class="text-4xl font-bold">S/ <span id="total">0.00</span></p>
+    </div>
+
+    <p id="aviso" class="hidden text-sm rounded-md px-3 py-2"></p>
+
+    <button id="cobrar" type="button"
+            class="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white font-semibold rounded-md py-3 text-lg">
+      <i class="fas fa-receipt mr-2"></i><span id="cobrar-texto">Generar ticket</span>
+    </button>
+    <button id="limpiar" type="button" class="w-full text-sm text-gray-500 hover:text-red-600">
+      Vaciar boleta
+    </button>
+  </aside>
+</div>
+
+{{ catalogo|json_script:"catalogo-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const CSRF = '{{ csrf_token }}';
+  const URL_VENTA = '{% url "api_venta" %}';
+  const MAX_RESULTADOS = 30;
+
+  // minusculas y sin tildes, para que "silicona" encuentre "Silicóna"
+  const normalizar = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+  const catalogo = JSON.parse(document.getElementById('catalogo-data').textContent);
+  catalogo.forEach(p => { p.clave = normalizar(p.nombre); });
+
+  const $ = id => document.getElementById(id);
+  const buscar = $('buscar'), resultados = $('resultados'), filas = $('filas');
+
+  let items = [];        // {producto_id, descripcion, unidad, cantidad, precio}
+  let opciones = [];     // lo que muestra el desplegable ahora mismo
+  let marcada = 0;
+
+  const numero = v => {
+    const n = parseFloat(String(v).replace(',', '.'));
+    return isFinite(n) ? n : 0;
+  };
+
+  // ---------------- Buscador ----------------
+  function filtrar() {
+    const texto = buscar.value.trim();
+    opciones = [];
+    marcada = 0;
+    if (texto) {
+      const palabras = normalizar(texto).split(/\s+/);
+      for (const p of catalogo) {
+        if (palabras.every(w => p.clave.includes(w))) {
+          opciones.push({ producto_id: p.id, descripcion: p.nombre, unidad: p.unidad });
+          if (opciones.length >= MAX_RESULTADOS) break;
+        }
+      }
+      // Siempre se puede vender algo que no esta en el catalogo
+      opciones.push({ producto_id: null, descripcion: texto, unidad: 'UND', libre: true });
+    }
+    pintarResultados();
+  }
+
+  function pintarResultados() {
+    resultados.replaceChildren();
+    resultados.classList.toggle('hidden', opciones.length === 0);
+    opciones.forEach((op, i) => {
+      const li = document.createElement('li');
+      li.className = 'px-3 py-2 cursor-pointer flex justify-between gap-3 '
+                   + (i === marcada ? 'bg-orange-100' : 'hover:bg-gray-50');
+      const nombre = document.createElement('span');
+      nombre.textContent = op.libre ? `Agregar "${op.descripcion}" como ítem libre` : op.descripcion;
+      if (op.libre) nombre.className = 'italic text-gray-600';
+      const unidad = document.createElement('span');
+      unidad.className = 'text-xs text-gray-400 shrink-0';
+      unidad.textContent = op.libre ? '' : op.unidad;
+      li.append(nombre, unidad);
+      // mousedown y no click: se dispara antes de que el input pierda el foco
+      li.addEventListener('mousedown', e => { e.preventDefault(); agregar(op); });
+      resultados.append(li);
+      if (i === marcada) li.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  buscar.addEventListener('input', filtrar);
+  buscar.addEventListener('blur', () => resultados.classList.add('hidden'));
+  buscar.addEventListener('focus', () => { if (opciones.length) resultados.classList.remove('hidden'); });
+  buscar.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!opciones.length) return;
+      e.preventDefault();
+      const paso = e.key === 'ArrowDown' ? 1 : -1;
+      marcada = (marcada + paso + opciones.length) % opciones.length;
+      pintarResultados();
+    } else if (e.key === 'Enter' && opciones.length) {
+      e.preventDefault();
+      agregar(opciones[marcada]);
+    } else if (e.key === 'Escape') {
+      buscar.value = '';
+      filtrar();
+    }
+  });
+
+  // ---------------- Boleta en armado ----------------
+  function agregar(op) {
+    const item = { producto_id: op.producto_id, descripcion: op.descripcion,
+                   unidad: op.unidad, cantidad: '1', precio: '' };
+    items.push(item);
+    buscar.value = '';
+    filtrar();
+    pintarFilas();
+    // El precio es lo unico que falta: el cursor va directo ahi
+    filas.lastElementChild.querySelector('[data-campo="precio"]').focus();
+  }
+
+  function campoNumerico(item, campo, fila) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.value = item[campo];
+    input.dataset.campo = campo;
+    input.placeholder = campo === 'precio' ? '0.00' : '';
+    input.className = 'w-full border border-gray-300 rounded-md px-2 py-1 text-right '
+                    + 'focus:outline-none focus:ring-2 focus:ring-orange-500';
+    input.addEventListener('focus', () => input.select());
+    input.addEventListener('input', () => {
+      item[campo] = input.value;
+      input.classList.remove('border-red-500', 'bg-red-50');
+      fila.querySelector('[data-subtotal]').textContent = subtotal(item).toFixed(2);
+      pintarTotal();
+    });
+    input.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      // Enter en cantidad pasa al precio; en precio vuelve al buscador
+      if (campo === 'cantidad') fila.querySelector('[data-campo="precio"]').focus();
+      else buscar.focus();
+    });
+    return input;
+  }
+
+  const subtotal = item => Math.round(numero(item.cantidad) * numero(item.precio) * 100) / 100;
+
+  function pintarFilas() {
+    filas.replaceChildren();
+    $('vacio').classList.toggle('hidden', items.length > 0);
+
+    items.forEach((item, i) => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-gray-100';
+
+      const tdNombre = document.createElement('td');
+      tdNombre.className = 'px-3 py-2';
+      tdNombre.textContent = item.descripcion;
+      const unidad = document.createElement('span');
+      unidad.className = 'ml-2 text-xs text-gray-400';
+      unidad.textContent = item.unidad;
+      tdNombre.append(unidad);
+
+      const tdCant = document.createElement('td');
+      tdCant.className = 'px-3 py-2';
+      tdCant.append(campoNumerico(item, 'cantidad', tr));
+
+      const tdPrecio = document.createElement('td');
+      tdPrecio.className = 'px-3 py-2';
+      tdPrecio.append(campoNumerico(item, 'precio', tr));
+
+      const tdSub = document.createElement('td');
+      tdSub.className = 'px-3 py-2 text-right font-medium';
+      tdSub.dataset.subtotal = '';
+      tdSub.textContent = subtotal(item).toFixed(2);
+
+      const tdQuitar = document.createElement('td');
+      tdQuitar.className = 'px-3 py-2 text-center';
+      const quitar = document.createElement('button');
+      quitar.type = 'button';
+      quitar.title = 'Quitar';
+      quitar.className = 'text-gray-400 hover:text-red-600';
+      quitar.innerHTML = '<i class="fas fa-trash"></i>';
+      quitar.addEventListener('click', () => { items.splice(i, 1); pintarFilas(); buscar.focus(); });
+      tdQuitar.append(quitar);
+
+      tr.append(tdNombre, tdCant, tdPrecio, tdSub, tdQuitar);
+      filas.append(tr);
+    });
+    pintarTotal();
+  }
+
+  function pintarTotal() {
+    const total = items.reduce((s, it) => s + subtotal(it), 0);
+    $('total').textContent = total.toFixed(2);
+  }
+
+  function avisar(texto, tipo, enlace) {
+    const aviso = $('aviso');
+    aviso.className = 'text-sm rounded-md px-3 py-2 '
+                    + (tipo === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700');
+    aviso.textContent = texto;
+    if (enlace) {
+      const a = document.createElement('a');
+      a.href = enlace; a.target = '_blank';
+      a.className = 'underline ml-1';
+      a.textContent = 'Ver / reimprimir';
+      aviso.append(a);
+    }
+  }
+
+  // ---------------- Cobro ----------------
+  function filasInvalidas() {
+    let primera = null;
+    filas.querySelectorAll('input').forEach(input => {
+      const mal = numero(input.value) <= 0;
+      input.classList.toggle('border-red-500', mal);
+      input.classList.toggle('bg-red-50', mal);
+      if (mal && !primera) primera = input;
+    });
+    return primera;
+  }
+
+  // ---------------- Tipo de comprobante ----------------
+  // '' = ticket interno, '03' = boleta electronica, '01' = factura electronica
+  let tipo = '';
+  const AYUDA = {
+    '': 'Ticket interno: no se envía a SUNAT.',
+    '03': 'Boleta electrónica: se firma y se envía a SUNAT.',
+    '01': 'Factura electrónica: requiere RUC y razón social.',
+  };
+  const TEXTO = { '': 'Generar ticket', '03': 'Emitir boleta', '01': 'Emitir factura' };
+
+  function elegirTipo(nuevo) {
+    tipo = nuevo;
+    document.querySelectorAll('.tipo').forEach(b => {
+      const activo = b.dataset.tipo === tipo;
+      b.classList.toggle('bg-orange-600', activo);
+      b.classList.toggle('text-white', activo);
+      b.classList.toggle('border-orange-600', activo);
+      b.classList.toggle('border-gray-300', !activo);
+    });
+    $('tipo-ayuda').textContent = AYUDA[tipo];
+    $('cobrar-texto').textContent = TEXTO[tipo];
+    $('cliente-req').textContent = tipo === '01' ? '(obligatorio)' : '(opcional)';
+    $('cliente_direccion').classList.toggle('hidden', tipo !== '01');
+  }
+  // Se recuerda la ultima eleccion en este navegador: si siempre emites
+  // boleta, no hay que volver a marcarla en cada venta.
+  const recordar = t => { try { localStorage.setItem('tipo_comprobante', t); } catch (e) {} };
+  const recordado = () => {
+    try { return localStorage.getItem('tipo_comprobante') || ''; } catch (e) { return ''; }
+  };
+  document.querySelectorAll('.tipo').forEach(b =>
+    b.addEventListener('click', () => { elegirTipo(b.dataset.tipo); recordar(b.dataset.tipo); }));
+  // La factura no se deja como predeterminada: exige RUC en cada venta
+  elegirTipo(recordado() === '03' ? '03' : '');
+
+  async function pedir(url, opciones) {
+    const resp = await fetch(url, opciones);
+    const datos = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, datos };
+  }
+  const enviarJSON = (url, cuerpo) => pedir(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify(cuerpo),
+  });
+
+  // Autocompletar nombre / razon social
+  $('buscar-doc').addEventListener('click', async () => {
+    const doc = $('cliente_documento').value.trim();
+    let url;
+    if (/^\d{8}$/.test(doc)) url = '{% url "consulta_dni_api" %}?dni=' + doc;
+    else if (/^\d{11}$/.test(doc)) url = '{% url "consulta_ruc_api" %}?ruc=' + doc;
+    else { avisar('Escribe un DNI (8 dígitos) o un RUC (11 dígitos).', 'error'); return; }
+
+    $('buscar-doc').disabled = true;
+    const { ok, datos } = await pedir(url).catch(() => ({ ok: false, datos: {} }));
+    $('buscar-doc').disabled = false;
+    const nombre = datos.nombre || datos.razon_social;
+    if (!ok || !nombre) {
+      avisar(datos.error || 'No se encontró. Escribe el nombre a mano.', 'error');
+      $('cliente_nombre').focus();
+      return;
+    }
+    $('cliente_nombre').value = nombre;
+    if (datos.direccion) $('cliente_direccion').value = datos.direccion;
+    if (doc.length === 11 && tipo !== '01') elegirTipo('01');
+    $('aviso').classList.add('hidden');
+  });
+
+  function clienteInvalido() {
+    const doc = $('cliente_documento').value.trim();
+    const nombre = $('cliente_nombre').value.trim();
+    if (tipo === '01') {
+      if (!/^\d{11}$/.test(doc)) return 'La factura necesita un RUC de 11 dígitos.';
+      if (!nombre) return 'La factura necesita la razón social del cliente.';
+    }
+    if (tipo === '03' && doc && !/^\d{8}$/.test(doc)) {
+      return 'Para boleta el documento debe ser un DNI de 8 dígitos (o déjalo vacío).';
+    }
+    return null;
+  }
+
+  /** Crea el comprobante electronico de una venta ya registrada y lo envia. */
+  async function emitirElectronico(ventaId) {
+    const doc = $('cliente_documento').value.trim();
+    const nombre = $('cliente_nombre').value.trim();
+    const crear = await enviarJSON('{% url "crear_comprobante_electronico_api" %}', {
+      venta_id: ventaId, tipo: tipo,
+      receptor_dni: tipo === '03' ? doc : '', receptor_nombre: tipo === '03' ? nombre : '',
+      receptor_ruc: tipo === '01' ? doc : '', receptor_razon_social: tipo === '01' ? nombre : '',
+      receptor_direccion: tipo === '01' ? $('cliente_direccion').value.trim() : '',
+    });
+    if (!crear.ok || !crear.datos.success) {
+      return { error: crear.datos.error || 'No se pudo crear el comprobante.' };
+    }
+    const comp = crear.datos.comprobante;
+    const envio = await enviarJSON('{% url "enviar_comprobante_sunat_api" %}', { comprobante_id: comp.id });
+    return {
+      numero: comp.numero_completo,
+      pdf: '{% url "pdf_boleta" "00000000-0000-0000-0000-000000000000" %}'
+             .replace('00000000-0000-0000-0000-000000000000', comp.id),
+      aceptado: envio.ok && envio.datos.aceptado === true,
+      estado: envio.datos.error || envio.datos.estado_sunat || 'sin respuesta',
+    };
+  }
+
+  $('cobrar').addEventListener('click', async () => {
+    if (!items.length) { avisar('Agrega al menos un producto.', 'error'); buscar.focus(); return; }
+    const mal = filasInvalidas();
+    if (mal) { avisar('Completa la cantidad y el precio de cada fila.', 'error'); mal.focus(); return; }
+    const problema = clienteInvalido();
+    if (problema) { avisar(problema, 'error'); $('cliente_documento').focus(); return; }
+
+    // La ventana se abre YA, dentro del clic: si se abre despues de la
+    // respuesta del servidor, el navegador la bloquea como popup.
+    const ventana = window.open('', '_blank');
+    $('cobrar').disabled = true;
+    try {
+      const { datos } = await enviarJSON(URL_VENTA, {
+        cliente_nombre: $('cliente_nombre').value,
+        cliente_documento: $('cliente_documento').value,
+        metodo_pago: $('metodo_pago').value,
+        items: items,
+      });
+      if (!datos.ok) throw new Error(datos.error || 'No se pudo registrar la venta.');
+
+      let destino = datos.boleta_url;
+      if (!tipo) {
+        avisar(`Ticket interno ${datos.numero} por S/ ${datos.total}. NO se envió a SUNAT: ` +
+               'si necesitas boleta o factura, emítela desde Ventas.', 'ok', destino);
+      } else {
+        avisar('Venta registrada. Enviando a SUNAT...', 'ok');
+        const e = await emitirElectronico(datos.id);
+        if (e.error) {
+          // La venta ya existe: no se pierde, se puede emitir luego desde Ventas
+          avisar(`Venta ${datos.numero} registrada, pero el comprobante falló: ${e.error} ` +
+                 'Puedes emitirlo desde Ventas.', 'error', destino);
+        } else if (e.aceptado) {
+          destino = e.pdf;
+          avisar(`${e.numero} aceptado por SUNAT. Total S/ ${datos.total}.`, 'ok', destino);
+        } else {
+          // Sin aceptacion puede no haber XML firmado: se imprime el ticket
+          avisar(`${e.numero} creado, pero no quedó aceptado. ${e.estado} `, 'error', destino);
+        }
+      }
+
+      if (ventana) ventana.location = destino;
+      items = [];
+      $('cliente_nombre').value = '';
+      $('cliente_documento').value = '';
+      $('cliente_direccion').value = '';
+      $('metodo_pago').selectedIndex = 0;
+      pintarFilas();
+      buscar.focus();
+    } catch (e) {
+      if (ventana) ventana.close();
+      avisar(e.message, 'error');
+    } finally {
+      $('cobrar').disabled = false;
+    }
+  });
+
+  $('limpiar').addEventListener('click', () => {
+    if (items.length && !confirm('¿Vaciar la boleta actual?')) return;
+    items = [];
+    pintarFilas();
+    buscar.focus();
+  });
+
+  // Evita perder una boleta a medio armar por cerrar la pestaña sin querer
+  window.addEventListener('beforeunload', e => { if (items.length) e.preventDefault(); });
+})();
+</script>
+{% endblock %}
